@@ -60,3 +60,35 @@ with st.expander("View captured leads"):
         st.dataframe(leads_df, use_container_width=True)
     else:
         st.info("No leads captured yet.")
+import urllib.parse
+
+# Aap ka WhatsApp number links ho gaya hai
+WHATSAPP_NUMBER = "923222620169" 
+
+# WhatsApp Button Display Logic
+default_text = "Hello PACK IT UP! I am using your AI Assistant and I want to place an order."
+encoded_text = urllib.parse.quote(default_text)
+whatsapp_url = f"https://wa.me{WHATSAPP_NUMBER}?text={encoded_text}"
+
+st.markdown(
+    f"""
+    <a href="{whatsapp_url}" target="_blank" style="text-decoration: none;">
+        <button style="
+            background-color: #25D366;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            width: 100%;
+            margin-top: 15px;
+            box-shadow: 0px 4px 6px rgba(0,0,0,0.1);
+            text-align: center;">
+            🟢 Order via WhatsApp
+        </button>
+    </a>
+    """,
+    unsafe_allow_html=True
+)
