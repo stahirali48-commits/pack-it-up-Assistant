@@ -92,3 +92,35 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+import pandas as pd
+from datetime import datetime
+from streamlit_gsheets import GSheetsConnection
+
+# Google Sheet connection setup
+if "GSHEETS_URL" in st.secrets:
+    try:
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        
+        # Agar naya lead mila ho to check karein
+        if st.session_state.get("captured_leads"):
+            new_lead = st.session_state.captured_leads[-1]
+            
+            # Maujuda data sheet se read karein
+            existing_data = conn.read(spreadsheet=st.secrets["GSHEETS_URL"])
+            
+            # Check karein agar ye email pehle se save to nahi
+            if new_lead['email'] not in existing_data['Email'].values:
+                # Naya row tayyar karein
+                new_row = pd.DataFrame([{
+                    "Name": "Customer",
+                    "Email": new_lead['email'],
+                    "Phone": new_lead['phone'],
+                    "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }])
+                
+                # Data combine kar ke sheet par update karein
+                updated_data = pd.concat([existing_data, new_row], ignore_index=True)
+                conn.update(spreadsheet=st.secrets["GSHEETS_URL"], data=updated_data)
+                st.success("Lead successfully saved to Google Sheets!")
+    except Exception as e:
+        st.error(f"Database sync error: {e}")
