@@ -1,3 +1,4 @@
+
 from datetime import datetime
 from pathlib import Path
 import ast
@@ -14,7 +15,9 @@ LEADS_FILE = Path("data") / "leads.csv"
 LEADS_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 
-# ---------------- COMPANY INFORMATION ----------------
+# ==================================================
+# COMPANY INFORMATION
+# ==================================================
 
 def get_company_information_logic(topic: str = "general") -> str:
     topic = (topic or "general").lower().strip()
@@ -71,7 +74,9 @@ def get_company_information_logic(topic: str = "general") -> str:
     )
 
 
-# ---------------- SERVICE PRICING ----------------
+# ==================================================
+# SERVICE PRICING
+# ==================================================
 
 def normalize_service_name(service: str) -> str:
     service = " ".join(
@@ -124,7 +129,9 @@ def get_service_price_logic(service: str) -> str:
     )
 
 
-# ---------------- SAFE CALCULATOR ----------------
+# ==================================================
+# SAFE CALCULATOR
+# ==================================================
 
 _ALLOWED_OPERATORS = {
     ast.Add: operator.add,
@@ -145,7 +152,6 @@ def _safe_eval(node):
     if isinstance(node, ast.BinOp):
         left = _safe_eval(node.left)
         right = _safe_eval(node.right)
-
         operation = _ALLOWED_OPERATORS.get(type(node.op))
 
         if operation is None:
@@ -174,7 +180,9 @@ def calculator_logic(expression: str) -> str:
         return f"Calculation error: {exc}"
 
 
-# ---------------- SAVE CUSTOMER LEADS ----------------
+# ==================================================
+# SAVE CUSTOMER LEADS
+# ==================================================
 
 def save_lead_logic(
     name: str,
@@ -205,8 +213,8 @@ def save_lead_logic(
                     "timestamp",
                     "name",
                     "email",
-                    "requirement"
-                ]
+                    "requirement",
+                ],
             )
 
             if not file_exists or LEADS_FILE.stat().st_size == 0:
@@ -222,46 +230,50 @@ def save_lead_logic(
             })
 
     except OSError:
-        return "Lead could not be saved due to a file/storage error."
+        return "Lead could not be saved due to a storage error."
 
-    return (
-        f"Lead saved successfully for {name} "
-        f"with email {email}."
-    )
+    return f"Lead saved successfully for {name} with email {email}."
 
 
-# ---------------- PRODUCT CATALOG HELPERS ----------------
+# ==================================================
+# CATALOG TEXT NORMALIZATION
+# ==================================================
 
 def _plain_catalog_text(value) -> str:
-    """Convert catalog HTML to readable text."""
-
+    """Convert catalog HTML into readable text."""
     text = html.unescape(
         re.sub(r"<[^>]*>", " ", str(value or ""))
     )
-
     return re.sub(r"\s+", " ", text).strip()
 
 
 def _normalize_catalog_text(value) -> str:
-    """Normalize different spellings of product dimensions."""
-
+    """Normalize micron symbols, dimensions and units."""
     text = _plain_catalog_text(value).lower()
 
-    text = text.replace("×", " x ").replace("✕", " x ")
+    # Treat Greek mu and micro sign as the word micron.
+    text = text.replace("μm", " micron ")
+    text = text.replace("µm", " micron ")
 
+    # Normalize spelling variations.
+    text = re.sub(r"\bmicrons?\b", "micron", text)
     text = re.sub(
-        r"(\d)\s*x\s*(\d)",
-        r"\1 x \2",
+        r"(?<=\d)\s*um\b",
+        " micron",
         text
     )
 
+    # Normalize dimensions, e.g. 14×20 and 14 x 20 cm.
+    text = text.replace("×", " x ").replace("✕", " x ")
+    text = re.sub(r"(\d)\s*x\s*(\d)", r"\1 x \2", text)
+
     text = re.sub(
-        r"(?<=\d)(cm|mm|inches|inch|microns|micron)\b",
+        r"(?<=\d)(cm|mm|inches|inch|in)\b",
         r" \1",
         text
     )
 
-    return text
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _catalog_tokens(value) -> list[str]:
@@ -271,21 +283,67 @@ def _catalog_tokens(value) -> list[str]:
     )
 
 
+def _extract_micron_values(value: str) -> set[str]:
+    """Extract explicit micron values from a catalog field."""
+    text = _normalize_catalog_text(value)
+
+    # Ignore comparison wording that is not an actual specification.
+    text = re.sub(
+        r"\b(?:stronger|thicker|heavier|better|more durable)"
+        r"\s+than\b[^.;]{0,100}",
+        " ",
+        text,
+    )
+
+    values = set()
+
+    for match in re.finditer(
+        r"\b(\d+(?:\.\d+)?)\s*micron\b",
+        text
+    ):
+        number = str(float(match.group(1))).rstrip("0").rstrip(".")
+        values.add(number)
+
+    return values
+
+
+def _requested_micron(query: str):
+    """Return an explicitly requested micron value, if supplied."""
+    text = _normalize_catalog_text(query)
+
+    match = re.search(
+        r"\b(\d+(?:\.\d+)?)\s*micron\b",
+        text
+    )
+
+    if not match:
+        return None
+
+    return str(float(match.group(1))).rstrip("0").rstrip(".")
+
+
+# ==================================================
+# PRODUCT SEARCH HELPERS
+# ==================================================
+
 _QUERY_STOPWORDS = {
     "what", "is", "a", "an", "the", "for", "to", "and", "of",
     "me", "about", "tell", "please", "show", "find", "search",
-    "product", "products", "details", "detail", "which", "my",
-    "i", "need", "want", "you", "can", "do", "does", "it", "its",
-    "kya", "kia", "hai", "hota", "hoti", "ka", "ki", "ke",
-    "iska", "batao", "chahiye", "mujhe", "mere", "liye",
-    "kaunsa", "konsa", "x", "mean", "means", "size", "sizes",
-    "material", "materials", "use", "uses", "used", "price",
-    "prices", "cost", "costs", "how", "much", "available",
+    "product", "products", "details", "detail", "size", "sizes",
+    "which", "my", "i", "need", "want", "you", "can", "do",
+    "does", "it", "its", "kya", "kia", "hai", "hain", "he",
+    "hota", "hoti", "ka", "ki", "ke", "iska", "is", "batao",
+    "chahiye", "mujhe", "mere", "liye", "kaunsa", "konsa",
+    "konsi", "kaunsi", "kon", "kaun", "sa", "si", "se", "wale",
+    "wali", "wala", "bhi", "abhi", "karna", "batana", "bata",
+    "do", "ye", "ya", "aur", "main", "mein", "kis", "kitne",
+    "kitni", "material", "materials", "use", "uses", "used",
+    "price", "prices", "cost", "costs", "how", "much", "available",
     "availability", "option", "options", "variant", "variants",
     "specification", "specifications", "thickness", "describe",
     "suitable", "recommend", "recommendation", "cm", "mm",
-    "inch", "inches", "aur", "bhi", "kaun", "kis", "karna",
-    "batana", "bata",
+    "inch", "inches", "micron", "microns", "um", "x",
+    "tamam", "naam", "bata", "kar", "karke",
 }
 
 _SYNONYM_GROUPS = [
@@ -294,14 +352,38 @@ _SYNONYM_GROUPS = [
     {"bag", "bags"},
     {"box", "boxes"},
     {"aluminium", "aluminum"},
+    {"clear", "transparent"},
+    {"golden", "gold"},
 ]
 
 
+def _remove_specific_dimensions_and_micron(query: str) -> str:
+    """Remove numeric constraints before matching product family words."""
+    text = _normalize_catalog_text(query)
+
+    text = re.sub(
+        r"\b\d+(?:\.\d+)?\s*x\s*\d+(?:\.\d+)?"
+        r"(?:\s*(?:cm|mm|inches|inch|in))?\b",
+        " ",
+        text,
+    )
+
+    text = re.sub(
+        r"\b\d+(?:\.\d+)?\s*micron\b",
+        " ",
+        text,
+    )
+
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def _query_term_groups(query: str) -> list[set[str]]:
+    cleaned = _remove_specific_dimensions_and_micron(query)
+
     terms = [
         word
-        for word in _catalog_tokens(query)
-        if word not in _QUERY_STOPWORDS
+        for word in _catalog_tokens(cleaned)
+        if word not in _QUERY_STOPWORDS and not word.isdigit()
     ]
 
     groups = []
@@ -313,7 +395,7 @@ def _query_term_groups(query: str) -> list[set[str]]:
                 for synonyms in _SYNONYM_GROUPS
                 if term in synonyms
             ),
-            {term}
+            {term},
         )
 
         if group not in groups:
@@ -337,13 +419,12 @@ def _variant_search_text(product: dict, variant: dict) -> str:
                 if isinstance(option, dict)
                 else ""
             )
-
             parts.extend([option_name, value])
 
     return " ".join(str(part) for part in parts if part)
 
 
-def _product_search_text(product: dict) -> str:
+def _product_fields(product: dict) -> dict[str, str]:
     tags = product.get("tags", []) or []
 
     if isinstance(tags, (list, tuple)):
@@ -356,20 +437,78 @@ def _product_search_text(product: dict) -> str:
         for variant in (product.get("variants", []) or [])
     )
 
-    return " ".join([
-        str(product.get("title", "")),
-        _plain_catalog_text(product.get("body_html", "")),
-        str(product.get("product_type", "")),
-        tags_text,
-        variants_text,
-    ])
+    return {
+        "title": str(product.get("title", "")),
+        "description": _plain_catalog_text(
+            product.get("body_html", "")
+        ),
+        "tags": tags_text,
+        "product_type": str(product.get("product_type", "")),
+        "variants": variants_text,
+    }
+
+
+def _product_search_text(product: dict) -> str:
+    return " ".join(_product_fields(product).values())
+
+
+def _product_micron_status(
+    product: dict
+) -> tuple[set[str], bool, str]:
+    """
+    Check product thickness.
+
+    Title and description take priority over tags. If the title and
+    description conflict, report the conflict instead of guessing.
+    Tags cannot override an explicit product specification.
+    """
+    fields = _product_fields(product)
+
+    title_values = _extract_micron_values(fields["title"])
+    description_values = _extract_micron_values(fields["description"])
+    tag_values = _extract_micron_values(fields["tags"])
+    type_values = _extract_micron_values(fields["product_type"])
+    variant_values = _extract_micron_values(fields["variants"])
+
+    primary_values = title_values | description_values
+
+    if len(primary_values) > 1:
+        title_text = (
+            ", ".join(sorted(title_values))
+            if title_values else "not specified"
+        )
+        description_text = (
+            ", ".join(sorted(description_values))
+            if description_values else "not specified"
+        )
+
+        note = (
+            "The catalog has conflicting micron specifications. "
+            f"Title: {title_text}. Description: {description_text}. "
+            "Do not present this as a confirmed thickness match."
+        )
+
+        return primary_values, True, note
+
+    # Critical: tags cannot override the explicit title/description.
+    if primary_values:
+        return primary_values, False, ""
+
+    # Only use metadata when no actual specification is available.
+    fallback_values = tag_values | type_values
+
+    if not fallback_values:
+        fallback_values = variant_values
+
+    return fallback_values, False, ""
 
 
 def _product_matches_query(product: dict, query: str) -> bool:
     groups = _query_term_groups(query)
 
+    # A query such as "160 micron" is a valid thickness-only search.
     if not groups:
-        return False
+        return True
 
     catalog_words = set(
         _catalog_tokens(_product_search_text(product))
@@ -381,30 +520,13 @@ def _product_matches_query(product: dict, query: str) -> bool:
     )
 
 
-def _fetch_public_catalog() -> dict:
-    """
-    Fetch the public Shopify catalog.
-    This endpoint returns up to 250 products per request.
-    """
-
-    url = "https://packitup.com.pk/products.json?limit=250"
-
-    request = Request(
-        url,
-        headers={"User-Agent": "Mozilla/5.0"}
-    )
-
-    with urlopen(request, timeout=10) as response:
-        return json.load(response)
-
-
 def _requested_dimensions(query: str):
-    normalized = _normalize_catalog_text(query)
+    text = _normalize_catalog_text(query)
 
     match = re.search(
-        r"(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)"
+        r"\b(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)"
         r"(?:\s*(cm|mm|inches|inch|in))?\b",
-        normalized
+        text,
     )
 
     if not match:
@@ -412,8 +534,61 @@ def _requested_dimensions(query: str):
 
     return (
         {match.group(1), match.group(2)},
-        match.group(3)
+        match.group(3),
     )
+
+
+def _dimension_is_in_product(product: dict, dimensions: set[str]) -> bool:
+    if not dimensions:
+        return True
+
+    tokens = set(_catalog_tokens(_product_search_text(product)))
+    return dimensions.issubset(tokens)
+
+
+def _product_dimension_variants(
+    product: dict,
+    requested_dimensions: set[str],
+    requested_unit: str | None,
+):
+    """Return exact dimension variants only when dimensions occur there."""
+    variant_data = []
+
+    for variant in (product.get("variants", []) or []):
+        variant_text = _variant_search_text(product, variant)
+        variant_tokens = set(_catalog_tokens(variant_text))
+
+        if requested_dimensions:
+            if not requested_dimensions.issubset(variant_tokens):
+                continue
+
+            if requested_unit and requested_unit not in variant_tokens:
+                continue
+
+        variant_data.append((variant, variant_text))
+
+    return variant_data
+
+
+# ==================================================
+# FETCH THE PUBLIC PRODUCT CATALOG
+# ==================================================
+
+def _fetch_public_catalog() -> dict:
+    """
+    Fetch up to 250 products from the public Shopify endpoint.
+    For a store with 187 published products, this limit may be sufficient
+    if the endpoint returns all published products.
+    """
+    url = "https://packitup.com.pk/products.json?limit=250"
+
+    request = Request(
+        url,
+        headers={"User-Agent": "Mozilla/5.0"},
+    )
+
+    with urlopen(request, timeout=10) as response:
+        return json.load(response)
 
 
 def _variant_price_text(variant: dict) -> str:
@@ -421,7 +596,7 @@ def _variant_price_text(variant: dict) -> str:
         price = float(variant.get("price"))
 
         if price >= 0:
-            return f"PKR {price:,.2f} (catalog-listed price)"
+            return f"PKR {price:,.2f}"
 
     except (TypeError, ValueError):
         pass
@@ -433,46 +608,43 @@ def _variant_availability_text(variant: dict) -> str:
     available = variant.get("available")
 
     if available is True:
-        return "Website purchase flag: available"
+        return "Available for purchase"
 
     if available is False:
-        return "Website purchase flag: unavailable"
+        return "Unavailable for purchase"
 
-    return "Availability status not provided"
+    return "Availability not provided by the catalog"
 
 
-# ---------------- PRODUCT SEARCH ----------------
+# ==================================================
+# PRODUCT SEARCH
+# ==================================================
 
-def search_products_logic(
-    query: str,
-    limit: int = 5
-) -> str:
+def search_products_logic(query: str, limit: int = 10) -> str:
     """
-    Search the live catalog by product name, description,
-    tags, sizes, variants and listed prices.
+    Search products by name, dimensions and micron.
+    Do not mix conflicting thicknesses or invent prices.
     """
-
     if not isinstance(query, str) or not query.strip():
-        return (
-            "Please enter a product name, size, material, "
-            "or search term."
-        )
+        return "Please enter a product name, size, material, or micron."
 
     try:
         catalog = _fetch_public_catalog()
 
     except Exception:
         return (
-            "I could not access the live product catalog, so "
-            "product details and prices cannot be verified right now. "
+            "The live product catalog could not be accessed, so product "
+            "details and prices cannot be verified right now. "
             "Please visit https://packitup.com.pk/"
         )
 
-    requested_sizes, requested_unit = _requested_dimensions(query)
+    requested_micron = _requested_micron(query)
+    dimensions, requested_unit = _requested_dimensions(query)
+
     matched_products = []
+    conflicts = []
 
     for product in catalog.get("products", []):
-
         if not _product_matches_query(product, query):
             continue
 
@@ -484,22 +656,52 @@ def search_products_logic(
             product.get("body_html", "")
         )
 
+        micron_values, has_conflict, conflict_note = (
+            _product_micron_status(product)
+        )
+
+        if requested_micron:
+            if has_conflict:
+                conflicts.append(f"- {title}: {conflict_note}")
+                continue
+
+            if requested_micron not in micron_values:
+                continue
+
+        if dimensions and not _dimension_is_in_product(product, dimensions):
+            continue
+
         variants = product.get("variants", []) or []
+
+        # If size is encoded in variant options, filter to that exact size.
+        # If the product description lists a size but variant data doesn't
+        # map prices to size, do not pretend the price is size-specific.
+        size_variants = _product_dimension_variants(
+            product,
+            dimensions,
+            requested_unit,
+        )
+
+        if dimensions and size_variants:
+            selected_variants = size_variants
+            size_price_note = ""
+        elif dimensions:
+            selected_variants = []
+            size_price_note = (
+                "The requested size appears in the product text, but the "
+                "catalog does not map a price or stock flag to that exact "
+                "size variant. Confirm the exact variant before quoting."
+            )
+        else:
+            selected_variants = [
+                (variant, _variant_search_text(product, variant))
+                for variant in variants
+            ]
+            size_price_note = ""
+
         variant_lines = []
 
-        for variant in variants:
-            variant_text = _variant_search_text(product, variant)
-            tokens = set(_catalog_tokens(variant_text))
-
-            if (
-                requested_sizes
-                and not requested_sizes.issubset(tokens)
-            ):
-                continue
-
-            if requested_unit and requested_unit not in tokens:
-                continue
-
+        for variant, variant_text in selected_variants[:10]:
             variant_title = _plain_catalog_text(
                 variant.get("title", "")
             )
@@ -508,7 +710,10 @@ def search_products_logic(
                 not variant_title
                 or variant_title.lower() == "default title"
             ):
-                variant_title = variant_text or "Unnamed variant"
+                variant_title = (
+                    _plain_catalog_text(variant_text)
+                    or "Unnamed variant"
+                )
 
             variant_lines.append(
                 f"  - {variant_title} | "
@@ -516,58 +721,41 @@ def search_products_logic(
                 f"{_variant_availability_text(variant)}"
             )
 
-        if requested_sizes and not variant_lines:
+        if variant_lines:
             variant_block = (
-                "Exact matching size variant was not confirmed "
-                "in the catalog response. Do not assume this product "
-                "is available in the requested dimensions."
+                "Catalog variant results:\n"
+                + "\n".join(variant_lines)
             )
-
-        elif variant_lines:
-            variant_block = (
-                "Listed variants:\n"
-                + "\n".join(variant_lines[:10])
-            )
-
         else:
             variant_block = (
-                "Variant details are not provided "
-                "in the catalog response."
+                "No exact size-specific price or stock record "
+                "was confirmed by the catalog."
             )
 
-        if len(description) > 700:
-            description = description[:697].rstrip() + "..."
+        if size_price_note:
+            variant_block += "\n" + size_price_note
 
-        product_link = (
-            f"https://packitup.com.pk/products/{product.get('handle')}"
-            if product.get("handle")
-            else "https://packitup.com.pk/"
+        thickness_line = (
+            "Catalog thickness: "
+            + ", ".join(sorted(micron_values))
+            + " micron"
+            if micron_values
+            else "Thickness is not explicitly confirmed in the catalog."
         )
 
-        details = (
-            description
-            or "Description not provided in the catalog response."
+        if len(description) > 900:
+            description = description[:897].rstrip() + "..."
+
+        handle = product.get("handle", "")
+        link = (
+            f"https://packitup.com.pk/products/{handle}"
+            if handle else "https://packitup.com.pk/"
         )
 
-        output = (
-            f"- {title}\n"
-            f"Description: {details}\n"
-            f"{variant_block}\n"
-            f"Product page: {product_link}"
-        )
-
-        groups = _query_term_groups(query)
-
+        fields = _product_fields(product)
         title_words = set(_catalog_tokens(title))
-
-        variant_words = set(
-            _catalog_tokens(
-                " ".join(
-                    _variant_search_text(product, variant)
-                    for variant in variants
-                )
-            )
-        )
+        variant_words = set(_catalog_tokens(fields["variants"]))
+        groups = _query_term_groups(query)
 
         score = sum(
             3 if group.intersection(title_words)
@@ -576,132 +764,198 @@ def search_products_logic(
             for group in groups
         )
 
-        matched_products.append((score, output))
+        matched_products.append((
+            score,
+            (
+                f"Product: {title}\n"
+                f"Description: "
+                f"{description or 'Not provided in catalog'}\n"
+                f"{thickness_line}\n"
+                f"{variant_block}\n"
+                f"Product page: {link}"
+            ),
+        ))
 
-    if not matched_products:
+    if not matched_products and not conflicts:
         return (
-            f"No matching catalog products were found for '{query}'. "
-            "The catalog may use a different product name or size format."
+            f"No exact catalog match was found for '{query}'. "
+            "The requested micron, size, or product specification may "
+            "not be explicitly recorded in the public catalog. Do not guess."
         )
 
-    matched_products.sort(
-        key=lambda item: item[0],
-        reverse=True
-    )
+    matched_products.sort(key=lambda item: item[0], reverse=True)
 
     try:
-        result_limit = max(1, min(int(limit), 10))
-
+        result_limit = max(1, min(int(limit), 20))
     except (TypeError, ValueError):
-        result_limit = 5
+        result_limit = 10
 
-    return (
-        "Matching products from the live catalog:\n\n"
-        + "\n\n".join(
-            text for _, text in matched_products[:result_limit]
+    output = []
+
+    if conflicts:
+        output.append(
+            "CATALOG SPECIFICATION CONFLICTS — NOT CONFIRMED MATCHES:\n"
+            + "\n".join(dict.fromkeys(conflicts))
         )
-    )
+
+    if matched_products:
+        output.append(
+            "CATALOG PRODUCT MATCHES:\n\n"
+            + "\n\n".join(
+                text for _, text in matched_products[:result_limit]
+            )
+        )
+
+    return "\n\n".join(output)
 
 
-# ---------------- PRODUCT AVAILABILITY ----------------
+# ==================================================
+# PRODUCT AVAILABILITY
+# ==================================================
 
 def check_stock_logic(query: str) -> str:
-    """
-    Check public catalog availability flags.
-    This does not return physical stock counts.
-    """
-
+    """Check catalog purchase flags for relevant products and variants."""
     if not isinstance(query, str) or not query.strip():
-        return "Please enter a product name or size."
+        return "Please enter a product name, size, or micron."
 
     try:
         catalog = _fetch_public_catalog()
 
     except Exception:
         return (
-            "Could not retrieve product availability. "
+            "Product availability could not be retrieved. "
             "Please check https://packitup.com.pk/"
         )
 
-    requested_sizes, requested_unit = _requested_dimensions(query)
+    requested_micron = _requested_micron(query)
+    dimensions, requested_unit = _requested_dimensions(query)
+
     matches = []
+    conflicts = []
 
     for product in catalog.get("products", []):
-
         if not _product_matches_query(product, query):
             continue
-
-        relevant_variants = []
-
-        for variant in product.get("variants", []) or []:
-            tokens = set(
-                _catalog_tokens(
-                    _variant_search_text(product, variant)
-                )
-            )
-
-            if (
-                requested_sizes
-                and not requested_sizes.issubset(tokens)
-            ):
-                continue
-
-            if requested_unit and requested_unit not in tokens:
-                continue
-
-            relevant_variants.append(variant)
 
         title = _plain_catalog_text(
             product.get("title", "Untitled product")
         )
 
-        link = (
-            f"https://packitup.com.pk/products/{product.get('handle')}"
-            if product.get("handle")
-            else "https://packitup.com.pk/"
+        micron_values, has_conflict, conflict_note = (
+            _product_micron_status(product)
         )
 
-        if requested_sizes and not relevant_variants:
-            status = (
-                "Exact requested size variant not confirmed; "
-                "availability for this size cannot be verified"
+        if requested_micron:
+            if has_conflict:
+                conflicts.append(f"- {title}: {conflict_note}")
+                continue
+
+            if requested_micron not in micron_values:
+                continue
+
+        if dimensions and not _dimension_is_in_product(product, dimensions):
+            continue
+
+        variants = product.get("variants", []) or []
+
+        size_variants = _product_dimension_variants(
+            product,
+            dimensions,
+            requested_unit,
+        )
+
+        if dimensions and size_variants:
+            selected_variants = size_variants
+            size_note = ""
+        elif dimensions:
+            selected_variants = []
+            size_note = (
+                "The size appears in the product text, but the catalog "
+                "does not associate a stock flag with that exact size."
+            )
+        else:
+            selected_variants = [
+                (variant, _variant_search_text(product, variant))
+                for variant in variants
+            ]
+            size_note = ""
+
+        flags = [
+            variant.get("available")
+            for variant, _ in selected_variants
+            if isinstance(variant.get("available"), bool)
+        ]
+
+        if not selected_variants and dimensions:
+            status = "Exact size availability is not confirmed"
+        elif not flags:
+            status = "Availability status not provided by catalog"
+        elif any(flags):
+            status = "At least one matching variant is available"
+        else:
+            status = "All matching variants are marked unavailable"
+
+        variant_lines = []
+
+        for variant, variant_text in selected_variants[:10]:
+            label = _plain_catalog_text(variant.get("title", ""))
+
+            if not label or label.lower() == "default title":
+                label = (
+                    _plain_catalog_text(variant_text)
+                    or "Unnamed variant"
+                )
+
+            variant_lines.append(
+                f"  - {label}: {_variant_availability_text(variant)}"
             )
 
-        else:
-            flags = [
-                variant.get("available")
-                for variant in relevant_variants
-                if isinstance(variant.get("available"), bool)
-            ]
+        handle = product.get("handle", "")
+        link = (
+            f"https://packitup.com.pk/products/{handle}"
+            if handle else "https://packitup.com.pk/"
+        )
 
-            if not flags:
-                status = "Availability status not provided"
+        lines = [f"- {title}: {status}"]
 
-            elif any(flags):
-                status = (
-                    "Available for purchase (catalog variant flag)"
-                )
+        if variant_lines:
+            lines.extend(variant_lines)
 
-            else:
-                status = (
-                    "Currently unavailable (catalog variant flag)"
-                )
+        if size_note:
+            lines.append(size_note)
 
-        matches.append(f"- {title} | {status} | {link}")
+        lines.append(f"  Product page: {link}")
+        matches.append("\n".join(lines))
 
-        if len(matches) >= 5:
+        if len(matches) >= 20:
             break
 
-    if not matches:
-        return f"No matching products were found for '{query}'."
+    output = []
 
-    return (
-        "Product availability from the catalog:\n"
-        + "\n".join(matches)
-    )
+    if conflicts:
+        output.append(
+            "CATALOG SPECIFICATION CONFLICTS — AVAILABILITY NOT CONFIRMED:\n"
+            + "\n".join(dict.fromkeys(conflicts))
+        )
+
+    if matches:
+        output.append(
+            "Product availability from matching catalog records:\n"
+            + "\n\n".join(matches)
+        )
+
+    if not output:
+        return (
+            f"No exact catalog match was found for '{query}'. "
+            "Availability cannot be verified from the available catalog data."
+        )
+
+    return "\n\n".join(output)
 
 
-# ---------------- DELIVERY INFORMATION ----------------
+# ==================================================
+# DELIVERY INFORMATION
+# ==================================================
 
 def get_delivery_info_logic(city: str) -> str:
     city = (city or "").strip()
@@ -715,7 +969,6 @@ def get_delivery_info_logic(city: str) -> str:
             "Same-day express delivery may be available at an extra "
             "charge, subject to confirmation."
         )
-
     else:
         delivery = "Standard delivery: 3–5 working days."
 
@@ -731,7 +984,9 @@ def get_delivery_info_logic(city: str) -> str:
     )
 
 
-# ---------------- BULK ORDER ESTIMATE ----------------
+# ==================================================
+# BULK ORDER ESTIMATE
+# ==================================================
 
 def calculate_bulk_order_logic(
     product: str,
@@ -761,8 +1016,8 @@ def calculate_bulk_order_logic(
         "ecommerce box": "ecommerce boxes",
     }
 
-    key = aliases.get(product, product)
-    selected = services.get(key)
+    product_key = aliases.get(product, product)
+    selected = services.get(product_key)
 
     if selected is None:
         for item in services.values():
@@ -778,7 +1033,6 @@ def calculate_bulk_order_logic(
 
     try:
         price = float(selected.get("starting_price_pkr"))
-
     except (TypeError, ValueError):
         return (
             "A valid starting price is not configured for this category."
@@ -794,10 +1048,10 @@ def calculate_bulk_order_logic(
     return (
         f"Category: {selected['display_name']}\n"
         f"Quantity: {quantity}\n"
-        f"Configured starting price: PKR {price:,.2f}\n"
+        f"Configured category starting price: PKR {price:,.2f}\n"
         f"Illustrative subtotal: PKR {total:,.2f}\n"
         "This is only an arithmetic estimate using the category "
-        "starting price, not an official quotation. Confirm the "
-        "product, pack size, actual unit price, bulk discounts, "
-        "and shipping before ordering."
+        "starting price, not an official quotation. Confirm the exact "
+        "product, pack size, actual unit price, bulk discounts, and "
+        "shipping charges before ordering."
     )
