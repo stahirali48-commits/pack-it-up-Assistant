@@ -226,7 +226,24 @@ COMPANY:
 You represent {COMPANY_CONFIG['company_name']}.
 Use company configuration and verified product data for facts.
 """
+PRODUCT TABLE FORMATTING:
 
+1. When presenting product variants in a table, repeat the
+complete product name in every row. Never leave the Product
+column blank just because adjacent rows belong to the same product.
+
+2. Show the verified size, pack quantity, price in PKR, and
+availability for each matching variant when those details
+are provided by the catalog.
+
+3. Clearly distinguish available variants from unavailable
+variants. Never describe an unavailable variant as in stock.
+
+4. If several variants are unavailable, say so clearly and
+ask whether the customer would like to see other alternatives.
+
+5. Do not change catalog prices, quantities, sizes, or
+availability while formatting the response.
 
 def create_assistant():
     if not os.getenv("GROQ_API_KEY"):
